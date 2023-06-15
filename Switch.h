@@ -7,8 +7,8 @@ using namespace std;
 
 enum SwitchPosition {
   PositionIrrelevant = 0,
-  PositionMain = 90,
-  PositionSecondary = 120
+  PositionSecondary = 45,
+  PositionMain = 90
 };
 
 struct Route {
@@ -16,6 +16,11 @@ struct Route {
   StationId mNext;
 
   bool isEqual(const Route&);       
+};
+
+struct RelaySwitchPosition {
+  uint8_t mPin;
+  SwitchPosition mPosition;
 };
 
 struct RouteConfig {
@@ -27,18 +32,28 @@ class Switch {
 private:
   const uint8_t mSwitchId;
   Servo mServo;
+  std::vector<RelaySwitchPosition> mRelayPositions;
   queue<SwitchPosition> mPositionQueue;
   vector<RouteConfig> mRouteConfigs;
+  uint64_t mTimeToSwitch;
+  uint64_t mTimer;
 
-  void moveSwitch(SwitchPosition);
 
 public:
   static uint8_t SwitchCounter;
-  Switch(uint8_t, vector<RouteConfig>);
+  void moveSwitch(SwitchPosition);
+  Switch(uint8_t, vector<RelaySwitchPosition>, vector<RouteConfig>);
 
+  vector<RelaySwitchPosition> getRelayPositions() const;
   uint8_t getId() const;
+  SwitchPosition getSwitchPosition();
+  StationId getStationForPosition(SwitchPosition) const;
 
-  void queueRoute(Route);
+  void startTimer();
+  bool timerExpired() const;
+
+  void pushRoute(Route);
+  void popRoute();
 };
 
 
