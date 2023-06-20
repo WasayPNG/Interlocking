@@ -8,22 +8,20 @@ uint8_t Switch::SwitchCounter = 0;
 
 Switch::Switch(uint8_t servoPin, vector<RelaySwitchPosition> relayPins, vector<RouteConfig> routes) :
   mServo(),
+  mServoPin(servoPin),
   mRelayPositions(relayPins),
   mSwitchId(Switch::SwitchCounter++),
   mPositionQueue(),
   mRouteConfigs(routes),
-  mTimeToSwitch(3000),
-  mTimer(0) {
-    Serial.println(servoPin);
-    Serial.println("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAa");
-    mServo.attach(servoPin);
-    for (auto rPinPair : relayPins)
-    {
-      pinMode(rPinPair.mPin, INPUT_PULLUP);
-    }
+  mTimeToSwitch(DEFAULT_TIME_TO_SWITCH),
+  mTimer(0) {}
+
+/* workaround hack to make sure servos get attached */
+void Switch::initServo() {
+  mServo.attach(mServoPin);
 }
 
-vector<RelaySwitchPosition> Switch::getRelayPositions() const {
+vector<RelaySwitchPosition>& Switch::getRelayPositions() {
   return mRelayPositions;
 }
 
@@ -32,41 +30,46 @@ uint8_t Switch::getId() const {
 }
 
 SwitchPosition Switch::getSwitchPosition() {
-  /* TODO: has to change if degrees in SwitchPosition change */
-  if (mServo.read() > PositionSecondary/2 && mServo.read() <= PositionSecondary) {
-    return PositionSecondary;
-  } else if (mServo.read() > PositionSecondary && mServo.read() <= PositionMain) {
-    return PositionMain;
-  }
-  return PositionIrrelevant;
-}
-
-StationId Switch::getStationForPosition(SwitchPosition swPos) const {
-  for (auto routeConfig : mRouteConfigs) {
-    if (routeConfig.mPosition == swPos)
-    {
-      return routeConfig.mRoute.mCurrent;
+  uint8_t errorThresh = 5;
+  uint8_t currPos = mServo.read();
+  SwitchPosition possiblePositions[] = {PositionIrrelevant, PositionMain, PositionSecondary};
+  for (SwitchPosition pos : possiblePositions) {
+    if (abs(currPos - pos) < errorThresh) {
+      return pos;
     }
   }
 }
+
+pair<StationId, StationId> Switch::getStationsForPosition(SwitchPosition swPos) const {
+  for (auto routeConfig : mRouteConfigs) {
+    if (routeConfig.mPosition == swPos)
+    {
+      return pair<StationId, StationId>(routeConfig.mRoute.mCurrent, routeConfig.mRoute.mNext);
+    }
+  }
+}
+
 
 void Switch::startTimer() {
   mTimer = millis();
 }
 
-bool Switch::timerExpired() const {
-  return (mTimer >= mTimeToSwitch);
+bool Switch::timerExpired() {
+  bool expired = (mTimer && (millis() - mTimer >= mTimeToSwitch));
+  if (expired) mTimer = 0;
+  return expired;
 }
 
 void Switch::moveSwitch(SwitchPosition newPos) {
-  for (uint8_t currPos = mServo.read(); abs(newPos - currPos) > 0; currPos = currPos + (newPos - currPos) / (abs(newPos - currPos))) {
-    mServo.write(currPos);
-    Serial.print("Switch ");
-    Serial.print(mSwitchId);
-    Serial.print(" moving to ");
-    Serial.println(currPos);
-    delay(20);
-  }
+  // for (uint8_t currPos = mServo.read(); abs(newPos - currPos) > 0; currPos = currPos + (newPos - currPos) / (abs(newPos - currPos))) {
+  //   mServo.write(currPos);
+  //   Serial.print("Switch ");
+  //   Serial.print(mSwitchId);
+  //   Serial.print(" moving to ");
+  //   Serial.println(currPos);
+  //   delay(20);
+  // }
+  mServo.write(newPos);
 }
 
 void Switch::pushRoute(Route r) {
@@ -74,6 +77,7 @@ void Switch::pushRoute(Route r) {
   for (RouteConfig rConfig : mRouteConfigs) {
     if (rConfig.mRoute.isEqual(r)) {
       newPosition = rConfig.mPosition;
+      break;
     }
   }
 
@@ -85,7 +89,8 @@ void Switch::pushRoute(Route r) {
 }
 
 void Switch::popRoute() {
-  mPositionQueue.pop();
+  if (!mPositionQueue.empty())
+    mPositionQueue.pop();
   if (!mPositionQueue.empty())
     moveSwitch(mPositionQueue.front());
 }

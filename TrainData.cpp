@@ -9,6 +9,7 @@ TrainData::TrainData(const vector<uint8_t> macAddress, uint8_t buttonPin) :
   mCurrentStation(StationAnton),
   mIsRunning(false),
   mWillArriveFirst(false),
+  mIsWaitingAtSwitch(false),
   mNextStationQueue() {}
 
 uint8_t TrainData::getId() const {
@@ -28,6 +29,15 @@ StationId TrainData::getCurrentStation() const {
 }
 
 StationId TrainData::getNextStation() const {
+  // queue<StationId> q = mNextStationQueue;
+  // Serial.println("BEGIN STATION QUEUE:");
+  // while (!q.empty()) {
+  //   auto st = q.front();
+  //   q.pop();
+  //   Serial.println(st);
+  // }
+  // Serial.println(":END STATION QUEUE");
+  if (mNextStationQueue.empty()) return StationInvalid;
   return mNextStationQueue.front();
 }
 
@@ -66,3 +76,10 @@ void TrainData::toggleArriveFirst() {
   mWillArriveFirst = !mWillArriveFirst;
 }
 
+bool TrainData::isWaitingAtSwitch() const {
+  return mIsWaitingAtSwitch;
+}
+
+void TrainData::toggleWaitingAtSwitch() {
+  mIsWaitingAtSwitch = !mIsWaitingAtSwitch;
+}

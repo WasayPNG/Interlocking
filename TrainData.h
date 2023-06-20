@@ -14,6 +14,7 @@ private:
   StationId mCurrentStation;
   queue<StationId> mNextStationQueue;
   bool mIsRunning;
+  bool mIsWaitingAtSwitch;
   bool mWillArriveFirst;
 
 public:
@@ -35,6 +36,8 @@ public:
   void toggleRunning();
   bool willArriveFirst() const;
   void toggleArriveFirst();
+  bool isWaitingAtSwitch() const;
+  void toggleWaitingAtSwitch();
 };
 
 

@@ -10,6 +10,14 @@
 #include "Station.h"
 #include "Switch.h"
 
+// TEST 
+#include "Button.h"
+
+Servo mServo14;
+Servo mServo19;
+
+
+
 using namespace std;
 
 #define NUMSLAVES 2
@@ -31,18 +39,24 @@ enum TrainCommands {
   TrainStart = 1
 };
 
-vector<TrainData> trainDataArray = {
-  /* macAddress, buttonPin */
-  TrainData({ 0x58, 0xBF, 0x25, 0x9D, 0x76, 0x35 }, 16), 
-  TrainData({ 0x3C, 0x61, 0x05, 0x64, 0xFA, 0x61 }, 5)
-};
 
-vector<Station> stationArray = {
-  /* stationEnum, buttonPin, relayPin */
-  {StationAnton, 17, A_RELAY},
-  {StationBaker, 18, B_RELAY},
-  {StationCharlie, 15, C_RELAY}
-};
+
+vector<TrainData> trainDataArray;
+//  = {
+//   /* macAddress, buttonPin */
+//   TrainData({ 0x58, 0xBF, 0x25, 0x9D, 0x76, 0x35 }, 16), 
+//   TrainData({ 0x3C, 0x61, 0x05, 0x64, 0xFA, 0x61 }, 5)
+// };
+
+vector<Station> stationArray;
+
+// = {
+//   /* stationEnum, buttonPin, relayPin */
+//   {StationAnton, 17, A_RELAY},
+//   {StationBaker, 18, B_RELAY},
+//   {StationCharlie, 15, C_RELAY}
+// };
+
 
 vector<Switch> switchArray;
 // vector<Switch> switchArray = {
@@ -125,11 +139,46 @@ void setup() {
   lcd.init();
   lcd.begin(20, 4);
   lcd.backlight();
+  
+  /* -==[ TRAINDATA ]==- */
+  /* macAddress, buttonPin */
+  trainDataArray.emplace_back(TrainData({ 0x58, 0xBF, 0x25, 0x9D, 0x76, 0x35 }, 16));
+  trainDataArray.emplace_back(TrainData({ 0x3C, 0x61, 0x05, 0x64, 0xFA, 0x61 }, 5));
 
-/* TODO: this might not work because there is no copy constructor and servo doesn't get properly attached when copied? */
+  /* -==[ STATIONS ]==- */
+  /* stationEnum, buttonPin, relayPin */
+  stationArray.push_back({StationAnton, 17, A_RELAY});
+  stationArray.push_back({StationBaker, 18, B_RELAY});
+  stationArray.push_back({StationCharlie, 15, C_RELAY});
+
+  /* -==[ SWITCHES ]==- */
+  switchArray.emplace_back(Switch(14, /* servo pin */ 
+    /* relay pins & positions to pass */
+    {{Button(12, DEFAULT_RELAY_DEBOUNCE), PositionIrrelevant}},
+    {
+      {
+        /* Departure -> Arrival */
+        {StationAnton, StationBaker},
+        /* Position */
+        PositionSecondary
+      },
+      {
+        {StationAnton, StationCharlie},
+        PositionMain
+      },
+      {
+        {StationBaker, StationAnton},
+        PositionIrrelevant
+      },
+      {
+        {StationCharlie, StationAnton},
+        PositionIrrelevant
+      },    
+  }));
+
   switchArray.emplace_back(Switch(19, /* servo pin */ 
     /* relay pins & positions to pass */
-    {{26, PositionMain}, {27, PositionSecondary}},
+    {{Button(26, DEFAULT_RELAY_DEBOUNCE), PositionMain}, {Button(27, DEFAULT_RELAY_DEBOUNCE), PositionSecondary}},
     { /* switch configs */
       {
         /* Departure -> Arrival */
@@ -151,7 +200,10 @@ void setup() {
       },
   }));
 
-  pinMode(27, OUTPUT);
+  for (auto &sw : switchArray) {
+    sw.initServo();
+  }
+
 }
 
 
@@ -273,22 +325,6 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
   Serial.println(macStr);
 }
 
-void SignalState(int signal, bool state) {
-  switch (signal) {
-    case 1:
-      digitalWrite(12, state);
-      digitalWrite(27, !state);
-      break;
-
-    case 2:
-      digitalWrite(26, state);
-      digitalWrite(25, !state);
-      break;
-    default: break;
-  }
-}
-
-
 /* Check if button for route has been pressed (and route needs to be set) */
 void CheckForRoutes() {
   for (TrainData &tData : trainDataArray) {
@@ -296,11 +332,7 @@ void CheckForRoutes() {
     if (tData.isButtonPressed()) {
       for (Station &st : stationArray) {
         /* check if we pressed a station button */
-        if (st.mId == StationBaker) {
-          Serial.print("STATION BUTTON PRESSED: ");
-          Serial.println(st.mButton.isPressed());
-        }
-        if (st.mButton.isPressed()) {
+        if (st.mButton.firstPress()) {
           StationId currFinSt;
           bool shouldStart = false;
           if (tData.hasDestination()) {    
@@ -313,6 +345,10 @@ void CheckForRoutes() {
           tData.pushDestination(st.mId);
           StationId nextSt = st.mId;
           Route newRoute = {currFinSt, nextSt};
+          Serial.print("Adding route DEPARTURE: ");
+          Serial.print(currFinSt);
+          Serial.print(" ---> ARRIVAL: ");
+          Serial.println(nextSt);
           /* add the new route in all of the switches queues */
           for (Switch &sw : switchArray) {
             sw.pushRoute(newRoute);
@@ -326,78 +362,110 @@ void CheckForRoutes() {
 
 /* Scan/Manage trains */
 void CheckForTrains() {
-  if (Slaves == 0) {
+  if (Slaves < 1) {
     ScanForSlave();
-  } else if (Slaves > 0) {
+  } else 
     ManageSlave();
-  }
 }
 
 void CheckSwitches() {
   for (auto &sw : switchArray) {
     /* check if train passed over switch */
-    for (auto &relayPos : sw.getRelayPositions())
+    for (auto &relayPos : sw.getRelayPositions()) {
       /* train detected! */
-      if (digitalRead(relayPos.mPin) == LOW) {
-
+      // Serial.print("Relay is pressed? ");
+      // Serial.print("RELAY: ");
+      // Serial.print(sw.getId());
+      // Serial.print(" Pressed: ");
+      // Serial.println(relayPos.mRelay.isPressed());
+      if (relayPos.mRelay.firstPress()) {
+        Serial.print("Relay for switch ");
+        Serial.print(sw.getId());
+        Serial.println(" detected that train ");
+        Serial.print("Current station: ");
+        Serial.println(sw.getStationsForPosition(sw.getSwitchPosition()).first);
+        Serial.print("Switch position: ");
+        Serial.println(sw.getSwitchPosition());
         /* check if we should send cmd to STOP the train */
-        if (relayPos.mPosition != sw.getSwitchPosition()) {
+        if (relayPos.mPosition != sw.getSwitchPosition() && relayPos.mPosition != PositionIrrelevant) {
           /* switch position is not correct for train! */
-          /* search for train that has the corresponding departure station */
+          /* search for train that has the corresponding departure and arrival stations */
           for (auto &tData : trainDataArray) {
-            if (tData.getCurrentStation() == sw.getStationForPosition(relayPos.mPosition)) {
+            auto switchStationConfig = sw.getStationsForPosition(relayPos.mPosition);
+            if (tData.getCurrentStation() == switchStationConfig.first && tData.getNextStation() == switchStationConfig.second) {
               sendCmdToTrain(TrainStop, tData);
+              tData.toggleWaitingAtSwitch();
               break;
             }
           }
         }
         /* train passed correctly */
-        else if (relayPos.mPosition == sw.getSwitchPosition()) {
+        else if (relayPos.mPosition == sw.getSwitchPosition() || relayPos.mPosition == PositionIrrelevant) {
+          Serial.println("Train passed correctly!");
           /* switch has to go to next position */
           sw.startTimer();
-          /* search for train that has the corresponding departure station */
+          /* search for train that has the corresponding departure and arrival stations */
           for (auto &tData : trainDataArray) {
-            if (tData.getCurrentStation() == sw.getStationForPosition(sw.getSwitchPosition())) {
+            auto switchStationConfig = sw.getStationsForPosition(sw.getSwitchPosition());
+            if (tData.getCurrentStation() == switchStationConfig.first && tData.getNextStation() == switchStationConfig.second) {
+              Serial.print(tData.getId());
+              Serial.println(" will arrive first in station");
               /* this train will arrive first in the station */
               tData.toggleArriveFirst();
               break;
             }
           }
         }
+      }
 
-        if (sw.timerExpired()) {
+      if (sw.timerExpired()) {
+          Serial.print("Switch ");
+          Serial.print(sw.getId());
+          Serial.println(" popped its queue!");
           sw.popRoute();
           for (auto &tData : trainDataArray) {
-            if (!tData.isRunning()) {
+            if (!tData.isRunning() && tData.isWaitingAtSwitch()) {
               /* this might need a timer */
               sendCmdToTrain(TrainStart, tData);
+              tData.toggleWaitingAtSwitch();
             }
           }
         }
-
-      }
-    
+    }
   }
 }
 
 void CheckStations() {
   for (auto &st : stationArray) {
     /* check if train passed over station */
-    if (digitalRead(st.mRelayPin) == LOW) {
+    if (st.mRelay.firstPress()) {
+      Serial.print("Relay for station ");
+      Serial.print(st.mId);
+      Serial.println(" detected train!");
       /* search for train that will arrive first and which has destination this station */
       for (auto &tData : trainDataArray) {
-          if (tData.getNextStation() == st.mId && tData.willArriveFirst()) {
-            /* this train probably is the one that reached station */
-            sendCmdToTrain(TrainStop, tData);
-            tData.toggleArriveFirst();
+        Serial.print("Train: ");
+        Serial.println(tData.getId());
+        Serial.print("Will arrive first? ");
+        Serial.println(tData.willArriveFirst());
+        Serial.print("Next station: ");
+        Serial.println(tData.getNextStation());
+        if (tData.getNextStation() == st.mId && tData.willArriveFirst()) {
+          /* this train probably is the one that reached station */
+          sendCmdToTrain(TrainStop, tData);
+          tData.toggleArriveFirst();
+          Serial.println("Stopped train...");
 
-            /* check if train should start going to next station */
-            tData.popDestination();
-            if (tData.hasDestination()) sendCmdToTrain(TrainStart, tData);
-            break;
+          /* check if train should start going to next station */
+          tData.popDestination();
+          if (tData.hasDestination()) {
+            sendCmdToTrain(TrainStart, tData);
+            Serial.println("Started train...");
           }
+          break;
         }
       }
+     }
   }
 }
 
@@ -473,8 +541,6 @@ void SystemInit() {
   lcd.print("Gara C: -");
 }
 
-
-
 void loop() {
   if (inited != true) {
     SystemInit();
@@ -483,9 +549,9 @@ void loop() {
       sw.moveSwitch(PositionMain);
     }
   }
-
   CheckForTrains();
   CheckForRoutes();
   CheckSwitches();
   CheckStations();
+
 }

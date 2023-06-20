@@ -5,9 +5,11 @@
 #include "Station.h"
 using namespace std;
 
+#define DEFAULT_TIME_TO_SWITCH 1500
+
 enum SwitchPosition {
   PositionIrrelevant = 0,
-  PositionSecondary = 45,
+  PositionSecondary = 25,
   PositionMain = 90
 };
 
@@ -19,7 +21,7 @@ struct Route {
 };
 
 struct RelaySwitchPosition {
-  uint8_t mPin;
+  Button mRelay;
   SwitchPosition mPosition;
 };
 
@@ -31,6 +33,7 @@ struct RouteConfig {
 class Switch {
 private:
   const uint8_t mSwitchId;
+  uint8_t mServoPin;
   Servo mServo;
   std::vector<RelaySwitchPosition> mRelayPositions;
   queue<SwitchPosition> mPositionQueue;
@@ -38,19 +41,20 @@ private:
   uint64_t mTimeToSwitch;
   uint64_t mTimer;
 
-
 public:
   static uint8_t SwitchCounter;
   void moveSwitch(SwitchPosition);
   Switch(uint8_t, vector<RelaySwitchPosition>, vector<RouteConfig>);
 
-  vector<RelaySwitchPosition> getRelayPositions() const;
+  void initServo();
+
+  vector<RelaySwitchPosition>& getRelayPositions();
   uint8_t getId() const;
   SwitchPosition getSwitchPosition();
-  StationId getStationForPosition(SwitchPosition) const;
+  pair<StationId, StationId> getStationsForPosition(SwitchPosition) const;
 
   void startTimer();
-  bool timerExpired() const;
+  bool timerExpired();
 
   void pushRoute(Route);
   void popRoute();

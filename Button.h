@@ -1,14 +1,17 @@
 #ifndef BUTTON_H
 #define BUTTON_H
 
+#define DEFAULT_RELAY_DEBOUNCE 50
+
 struct Button {
   uint8_t mPin;
   uint64_t mDebounceTimer;
   uint64_t mDebounceDelay;
   bool mButtonState;
   bool mLastButtonState;
+  bool mWasPressed;
 
-  Button(uint8_t pin) : mPin(pin), mDebounceTimer(0), mDebounceDelay(300), mButtonState(HIGH), mLastButtonState(HIGH) {
+  Button(uint8_t pin, uint64_t debounceDelay = 300) : mPin(pin), mDebounceTimer(0), mDebounceDelay(debounceDelay), mButtonState(HIGH), mLastButtonState(HIGH), mWasPressed(HIGH) {
     pinMode(pin, INPUT_PULLUP);
   }
   bool isPressed() {
@@ -20,12 +23,25 @@ struct Button {
     if (millis() - mDebounceTimer > mDebounceDelay) {
       if (readState != mButtonState) {
         mButtonState = readState;
-        Serial.println("BUTTON PRESSED!");
       }
     }
     
     mLastButtonState = readState;
     return !mButtonState;
+  }
+
+  bool justPressed() {
+    bool beforeWasPressed = mWasPressed; 
+    mWasPressed = mButtonState;
+    return beforeWasPressed;
+  }
+
+  bool firstPress() {
+    if (isPressed() && justPressed())
+      return true;
+    else if (!isPressed())
+      justPressed();
+    return false;
   }
 };
 
